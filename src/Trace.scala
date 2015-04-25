@@ -1,3 +1,9 @@
+import akka.actor._
+import scala.concurrent.duration.Duration
+import scala.concurrent.duration._
+
+
+
 object Trace {
 
   val AntiAliasingFactor = 4
@@ -10,22 +16,15 @@ object Trace {
   var darkCount = 0
 
   def main(args: Array[String]): Unit = {
-    
-    println("Hello World !");
-    
-//    if (args.length != 2) {
-//      println("usage: scala Trace input.dat output.png")
-//      System.exit(-1)
-//    }
+    if (args.length != 2) {
+      println("usage: scala Trace input.dat output.png")
+      System.exit(-1)
+    }
 
-    
-    val infile="input.dat"
-    val outfile = "output.png"
-    println("infile is  " + infile)
-    // val (infile, outfile) = (args(0), args(1))
+    val (infile, outfile) = (args(0), args(1))
     val scene = Scene.fromFile(infile)
 
-   render(scene, outfile, Width, Height)
+    render(scene, outfile, Width, Height)
 
     println("rays cast " + rayCount)
     println("rays hit " + hitCount)
@@ -38,15 +37,19 @@ object Trace {
 
     // Init the coordinator -- must be done before starting it.
     Coordinator.init(image, outfile)
+    
+    val system = ActorSystem("RayTracer")
+    val coordinator = system.actorOf(Props(Coordinator), name="coordinator")
+    
 
     // TODO: Start the Coordinator actor.
 
-    scene.traceImage(width, height)
+    scene.traceImage(width, height, system, coordinator)
 
     // TODO:
     // This one is tricky--we can't simply send a message here to print
     // the image, since the actors started by traceImage haven't necessarily
     // finished yet.  Maybe print should be called elsewhere?
-    Coordinator.print
+    //Coordinator.print
   }
 }

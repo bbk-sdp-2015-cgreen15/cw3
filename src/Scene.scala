@@ -1,3 +1,11 @@
+import akka.actor._
+import scala.concurrent.duration.Duration
+import akka.routing.RoundRobinRouter
+import scala.concurrent.duration._
+
+//Messages
+case class SetRow(y:Int, width:Int, height:Int, scene:Scene, coordinator:ActorRef)
+
 object Scene {
 
   import java.io.{FileReader, LineNumberReader}
@@ -5,7 +13,6 @@ object Scene {
   import scala.annotation.tailrec
 
   def fromFile(file: String) = {
-    println("jobby")
     val in = new LineNumberReader(new FileReader(file))
     val (objects, lights) = readLines(in, Nil, Nil)
     new Scene(objects, lights)
@@ -14,7 +21,6 @@ object Scene {
   @tailrec
   private def readLines(in: LineNumberReader, objects: List[Shape], lights: List[Light]): (List[Shape], List[Light]) = {
     val line = in.readLine
-    println(line)
     if (line == null) {
       (objects, lights) match {
         case (Nil, _) => throw new RuntimeException("no objects")
@@ -41,34 +47,22 @@ object Scene {
   }
 }
 
-class Scene private(val objects: List[Shape], val lights: List[Light]) {
 
-  private def this(p: (List[Shape], List[Light])) = this(p._1, p._2)
-
-  val ambient = .1f
-  val background = Colour.black
-
-  val eye = Vector.origin
-  val angle = 60f // viewing angle
-  //val angle = 180f // fisheye
-
-  def traceImage(width: Int, height: Int) {
-
-    val frustum = (.5 * angle * math.Pi / 180).toFloat
+class RowActor extends Actor {  
+   def receive = {
+    case SetRow(y, width, height, scene, coordinator) => ProcessRow(y, width, height, scene, coordinator)
+   }
+   
+   def ProcessRow(y:Int, width:Int, height:Int, scene:Scene, coordinator:ActorRef) = {
+    val frustum = (.5 * scene.angle * math.Pi / 180).toFloat
 
     val cosf = math.cos(frustum)
     val sinf = math.sin(frustum)
 
     // Anti-aliasing parameter -- divide each pixel into sub-pixels and
     // average the results to get smoother images.
-    val ss = Trace.AntiAliasingFactor
-
-    // TODO:
-    // Create a parallel version of this loop, creating one actor per pixel or per row of
-    // pixels.  Each actor should send the Coordinator messages to set the
-    // color of a pixel.  The actor need not receive any messages.
-
-    for (y <- 0 until height) {
+    val ss = Trace.AntiAliasingFactor     
+     
       for (x <- 0 until width) {
 
         // This loop body can be sequential.
@@ -84,7 +78,7 @@ class Scene private(val objects: List[Shape], val lights: List[Light]) {
               (sinf * 2 * (height.toFloat / width) * (.5 - (y + dy.toFloat / ss) / height)).toFloat,
               cosf.toFloat).normalized
 
-            val c = trace(Ray(eye, dir)) / (ss * ss)
+            val c = scene.trace(Ray(scene.eye, dir)) / (ss * ss)
             colour += c
           }
         }
@@ -94,8 +88,39 @@ class Scene private(val objects: List[Shape], val lights: List[Light]) {
         if (Vector(colour.r, colour.g, colour.b).norm > 1)
           Trace.lightCount += 1
 
-        Coordinator.set(x, y, colour)
+          //nameOfActor ! Message(par1,par2)
+        coordinator ! SetPixel(x, y, colour)
+        //Coordinator.set(x, y, colour)
       }
+     
+   }
+}
+
+
+class Scene private(val objects: List[Shape], val lights: List[Light]) {
+
+  private def this(p: (List[Shape], List[Light])) = this(p._1, p._2)
+
+  val ambient = .2f
+  val background = Colour.black
+
+  val eye = Vector.origin
+  val angle = 90f // viewing angle
+  //val angle = 180f // fisheye
+
+  def traceImage(width: Int, height: Int, system:ActorSystem, coordinator:ActorRef) {
+
+    // TODO:
+    // Create a parallel version of this loop, creating one actor per pixel or per row of
+    // pixels.  Each actor should send the Coordinator messages to set the
+    // colour of a pixel.  The actor need not receive any messages.
+
+    val numberOfCores = 8
+    val router = system.actorOf(Props[RowActor].withRouter(RoundRobinRouter(numberOfCores)),name="router")
+    
+    for (y <- 0 until height) {
+      router ! SetRow(y, width, height, this, coordinator)
+        
     }
   }
 
